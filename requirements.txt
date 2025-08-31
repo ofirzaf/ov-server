@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+openvino-genai
+optimum-intel
+openai
