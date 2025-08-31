@@ -6,49 +6,36 @@ Tests assume the server is already running and use the OpenAI client library
 to interact with the API endpoints.
 
 Usage:
-    python test_server.py                           # Test against default localhost:8000
-    python test_server.py --base-url http://host:port  # Test against custom URL
+    pytest test_server.py -v                                    # Test against default localhost:8000
+    pytest test_server.py --base-url http://host:port -v        # Test against custom URL
+    pytest test_server.py::TestOVServer::test_models_endpoint_get -v  # Run specific test
+    pytest test_server.py -k "thinking" -v                      # Run tests matching pattern
 """
 
-import argparse
-import json
 import pytest
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 import requests
-import time
 from typing import List, Dict, Any
 
 
 class TestOVServer:
     """Test suite for OpenVINO GenAI Server OpenAI API endpoints."""
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
-        """Initialize test client with server URL.
-        
-        Args:
-            base_url: Base URL of the running server (default: http://localhost:8000)
-        """
-        self.base_url = base_url
-        self.client = OpenAI(
-            base_url=f"{base_url}/v1",
-            api_key="test-key"  # Server doesn't validate API keys based on the code
-        )
-    
-    def test_server_health(self):
+    def test_server_health(self, base_url):
         """Test if the server is running and accessible."""
         try:
-            response = requests.get(f"{self.base_url}/v1/models", timeout=5)
-            assert response.status_code == 200, f"Server not accessible at {self.base_url}"
-            print(f"✓ Server is running at {self.base_url}")
+            response = requests.get(f"{base_url}/v1/models", timeout=5)
+            assert response.status_code == 200, f"Server not accessible at {base_url}"
+            print(f"✓ Server is running at {base_url}")
         except requests.exceptions.RequestException as e:
-            pytest.fail(f"Server not accessible at {self.base_url}: {e}")
+            pytest.fail(f"Server not accessible at {base_url}: {e}")
     
-    def test_models_endpoint_get(self):
+    def test_models_endpoint_get(self, client):
         """Test GET /v1/models endpoint returns model list."""
         try:
-            models = self.client.models.list()
+            models = client.models.list()
             
             # Validate response structure
             assert hasattr(models, 'object'), "Response should have 'object' field"
@@ -63,19 +50,19 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Failed to get models: {e}")
     
-    def test_models_endpoint_options(self):
+    def test_models_endpoint_options(self, base_url):
         """Test OPTIONS /v1/models endpoint for CORS support."""
         try:
-            response = requests.options(f"{self.base_url}/v1/models")
+            response = requests.options(f"{base_url}/v1/models")
             assert response.status_code == 200, "OPTIONS request should succeed"
             print("✓ Models endpoint supports OPTIONS requests")
         except requests.exceptions.RequestException as e:
             pytest.fail(f"OPTIONS request failed: {e}")
     
-    def test_chat_completions_simple_streaming(self):
+    def test_chat_completions_simple_streaming(self, client):
         """Test basic streaming chat completion with a simple user message."""
         try:
-            stream = self.client.chat.completions.create(
+            stream = client.chat.completions.create(
                 model="test-model",  # Model name doesn't matter based on server code
                 messages=[
                     {"role": "user", "content": "Hello, how are you?"}
@@ -116,10 +103,10 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Basic streaming chat completion failed: {e}")
     
-    def test_chat_completions_streaming(self):
+    def test_chat_completions_streaming(self, client):
         """Test streaming chat completion response."""
         try:
-            stream = self.client.chat.completions.create(
+            stream = client.chat.completions.create(
                 model="test-model",
                 messages=[
                     {"role": "user", "content": "Tell me a short story."}
@@ -154,7 +141,7 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Streaming chat completion failed: {e}")
     
-    def test_chat_completions_multi_turn_streaming(self):
+    def test_chat_completions_multi_turn_streaming(self, client):
         """Test multi-turn conversation with assistant and user messages using streaming."""
         try:
             messages = [
@@ -163,7 +150,7 @@ class TestOVServer:
                 {"role": "user", "content": "What about 3+3?"}
             ]
             
-            stream = self.client.chat.completions.create(
+            stream = client.chat.completions.create(
                 model="test-model",
                 messages=messages,
                 max_tokens=30,
@@ -188,10 +175,10 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Multi-turn conversation streaming failed: {e}")
     
-    def test_chat_completions_with_stop_sequences_streaming(self):
+    def test_chat_completions_with_stop_sequences_streaming(self, client):
         """Test streaming chat completion with stop sequences."""
         try:
-            stream = self.client.chat.completions.create(
+            stream = client.chat.completions.create(
                 model="test-model",
                 messages=[
                     {"role": "user", "content": "Count from 1 to 10: 1, 2, 3,"}
@@ -219,14 +206,14 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Stop sequences streaming test failed: {e}")
     
-    def test_chat_completions_temperature_variations_streaming(self):
+    def test_chat_completions_temperature_variations_streaming(self, client):
         """Test streaming chat completion with different temperature settings."""
         try:
             base_prompt = "Describe the color blue in one sentence."
             temperatures = [0.0, 0.5, 1.0]
             
             for temp in temperatures:
-                stream = self.client.chat.completions.create(
+                stream = client.chat.completions.create(
                     model="test-model",
                     messages=[{"role": "user", "content": base_prompt}],
                     max_tokens=30,
@@ -249,7 +236,7 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Temperature variations streaming test failed: {e}")
     
-    def test_chat_completions_with_system_message_streaming(self):
+    def test_chat_completions_with_system_message_streaming(self, client):
         """Test streaming chat completion with system message."""
         try:
             messages = [
@@ -257,7 +244,7 @@ class TestOVServer:
                 {"role": "user", "content": "Hello!"}
             ]
             
-            stream = self.client.chat.completions.create(
+            stream = client.chat.completions.create(
                 model="test-model",
                 messages=messages,
                 max_tokens=50,
@@ -282,12 +269,12 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"System message streaming test failed: {e}")
     
-    def test_chat_completions_invalid_request(self):
+    def test_chat_completions_invalid_request(self, client):
         """Test error handling for invalid chat completion requests."""
         try:
             # Test with empty messages - should fail
             try:
-                stream = self.client.chat.completions.create(
+                stream = client.chat.completions.create(
                     model="test-model",
                     messages=[],  # Empty messages should cause error
                     max_tokens=50,
@@ -301,7 +288,7 @@ class TestOVServer:
             
             # Test with non-user last message - should fail
             try:
-                stream = self.client.chat.completions.create(
+                stream = client.chat.completions.create(
                     model="test-model",
                     messages=[
                         {"role": "user", "content": "Hello"},
@@ -319,11 +306,11 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Invalid request test setup failed: {e}")
     
-    def test_generation_config_parameters_streaming(self):
+    def test_generation_config_parameters_streaming(self, client):
         """Test various generation configuration parameters with streaming."""
         try:
             # Test with custom generation parameters
-            stream = self.client.chat.completions.create(
+            stream = client.chat.completions.create(
                 model="test-model",
                 messages=[{"role": "user", "content": "Write a haiku about programming."}],
                 max_tokens=100,
@@ -351,11 +338,11 @@ class TestOVServer:
         except Exception as e:
             pytest.fail(f"Generation config streaming test failed: {e}")
     
-    def test_chat_template_kwargs_disable_thinking(self):
+    def test_chat_template_kwargs_disable_thinking(self, client):
         """Test chat template with thinking disabled via chat_template_kwargs."""
         try:
             # Test with thinking disabled
-            response = self.client.chat.completions.create(
+            response = client.chat.completions.create(
                 model="test-model",
                 messages=[{"role": "user", "content": "Solve this step by step: What is 15 + 27?"}],
                 max_tokens=100,
@@ -384,75 +371,3 @@ class TestOVServer:
             
         except Exception as e:
             pytest.fail(f"Chat template kwargs test failed: {e}")
-
-
-def run_tests(base_url: str = "http://localhost:8000"):
-    """Run all tests against the specified server URL.
-    
-    Args:
-        base_url: Base URL of the running server
-    """
-    print(f"Running OpenVINO GenAI Server tests against {base_url}")
-    print("=" * 60)
-    
-    test_suite = TestOVServer(base_url)
-    
-    # List of test methods to run
-    test_methods = [
-        test_suite.test_server_health,
-        test_suite.test_models_endpoint_get,
-        test_suite.test_models_endpoint_options,
-        test_suite.test_chat_completions_simple_streaming,
-        test_suite.test_chat_completions_streaming,
-        test_suite.test_chat_completions_multi_turn_streaming,
-        test_suite.test_chat_completions_with_stop_sequences_streaming,
-        test_suite.test_chat_completions_temperature_variations_streaming,
-        test_suite.test_chat_completions_with_system_message_streaming,
-        test_suite.test_chat_completions_invalid_request,
-        test_suite.test_generation_config_parameters_streaming,
-        test_suite.test_chat_template_kwargs_disable_thinking,
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for test_method in test_methods:
-        try:
-            print(f"\nRunning {test_method.__name__}...")
-            test_method()
-            passed += 1
-        except Exception as e:
-            print(f"✗ {test_method.__name__} FAILED: {e}")
-            failed += 1
-    
-    print("\n" + "=" * 60)
-    print(f"Test Results: {passed} passed, {failed} failed")
-    
-    if failed > 0:
-        exit(1)
-    else:
-        print("All tests passed! 🎉")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Test OpenVINO GenAI Server")
-    parser.add_argument(
-        "--base-url",
-        type=str,
-        default="http://localhost:8000",
-        help="Base URL of the running server (default: http://localhost:8000)"
-    )
-    
-    args = parser.parse_args()
-    
-    # Install required packages if not available
-    try:
-        import openai
-        import requests
-    except ImportError as e:
-        print(f"Missing required package: {e}")
-        print("Please install required packages:")
-        print("pip install openai requests pytest")
-        exit(1)
-    
-    run_tests(args.base_url)
