@@ -46,11 +46,10 @@ class OVServer:
         self.device = device
         
         try:
-            logger.info("Setting up scheduler configuration")
             scheduler_config = ovgenai.SchedulerConfig()
             scheduler_config.dynamic_split_fuse = False
             scheduler_config.max_num_batched_tokens = 4096 * 4
-            scheduler_config.enable_prefix_caching = True
+            # scheduler_config.enable_prefix_caching = True
             # scheduler_config.num_kv_blocks = 4096 // 16
             logger.info(f"Loading LLM pipeline from {self.model_path} on {self.device}")
             self.model = ovgenai.LLMPipeline(
