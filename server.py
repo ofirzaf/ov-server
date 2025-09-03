@@ -19,6 +19,7 @@ from openai.types.chat.chat_completion_chunk import (
         ChatCompletionChunk,
         Choice,
         ChoiceDelta,
+        CompletionUsage
     )
 
 from iterable_streamer import IterableStreamer
@@ -38,7 +39,7 @@ class OVServer:
         ):
         logger.info(f"Initializing OV Server with model: {model_path}, device: {device}, host: {host}, port: {port}")
         
-        self.model_name_or_path = model_path
+        self.model_path = model_path
         self.port = port
         self.host = host
         self.log_level = log_level
@@ -51,10 +52,9 @@ class OVServer:
             scheduler_config.max_num_batched_tokens = 4096 * 4
             scheduler_config.enable_prefix_caching = True
             # scheduler_config.num_kv_blocks = 4096 // 16
-            
-            logger.info(f"Loading LLM pipeline from {self.model_name_or_path} on {self.device}")
+            logger.info(f"Loading LLM pipeline from {self.model_path} on {self.device}")
             self.model = ovgenai.LLMPipeline(
-                self.model_name_or_path,
+                self.model_path,
                 self.device,
                 scheduler_config=scheduler_config,
             )
@@ -98,7 +98,7 @@ class OVServer:
         # Right now the server only handles a single model
         return [
             {
-                "id": self.model_name_or_path,
+                "id": self.model_path,
                 "object": "model",
                 "created": datetime.datetime.now().timestamp(),
                 "owned_by": "user",
@@ -135,7 +135,6 @@ class OVServer:
 
     def process_chat_completions(self, request: dict):
         request_id = request.get("request_id", "req_0")
-        logger.info(f"Processing chat completion request {request_id}")
         
         messages = request.get("messages", [])
         if not messages or messages[-1]["role"] != "user":
@@ -169,20 +168,25 @@ class OVServer:
             results = ""
 
             try:
-                logger.info(f"Starting generation for request {_request_id}")
                 thread.start()
-                yield self.build_chat_completion_chunk(_request_id, role="assistant", model=self.model_name_or_path)
+                yield self.build_chat_completion_chunk(_request_id, role="assistant", model=self.model_path)
                 
                 token_count = 0
                 for result in streamer:
                     results += result
                     if result != "":
-                        token_count += 1
-                        yield self.build_chat_completion_chunk(_request_id, content=result, model=self.model_name_or_path)
-                
-                logger.info(f"Generation completed for request {_request_id}. Generated {token_count} tokens")
-                # TODO add usage stats if requested
-                yield self.build_chat_completion_chunk(_request_id, finish_reason="stop", model=self.model_name_or_path)
+                        token_count += 1  # Might not be accurate. We assume the streamer outputs all
+                        yield self.build_chat_completion_chunk(_request_id, content=result, model=self.model_path)
+
+                logger.info(f"Generation completed for request {_request_id}. Prompt: {inputs.shape[1]} tokens, Generated: {token_count} tokens")
+                usage = None
+                if request.get("stream_options", {}).get("include_usage"):
+                    usage = {
+                        "prompt_tokens": inputs.shape[1],
+                        "completion_tokens": token_count,
+                        "total_tokens": inputs.shape[1] + token_count
+                    }
+                yield self.build_chat_completion_chunk(_request_id, finish_reason="stop", model=self.model_path, usage=usage)
 
                 thread.join()
             except Exception as e:
@@ -198,6 +202,7 @@ class OVServer:
             model=None,
             role=None,
             finish_reason=None,
+            usage=None,
         ):
         chunk = ChatCompletionChunk(
             id=request_id,
@@ -215,6 +220,7 @@ class OVServer:
             ],
             system_fingerprint="",
             object="chat.completion.chunk",
+            usage=CompletionUsage(**usage) if usage is not None else None,
         )
         return f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
 
