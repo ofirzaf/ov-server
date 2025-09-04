@@ -191,17 +191,27 @@ class OVServer:
             results = ""
 
             try:
+                times = []
+                times.append(time.perf_counter())
                 thread.start()
                 yield self.build_chat_completion_chunk(_request_id, role="assistant", model=self.model_path)
                 
-                token_count = 0
                 for result in streamer:
                     results += result
                     if result != "":
-                        token_count += 1  # Might not be accurate. We assume the streamer outputs all
+                        times.append(time.perf_counter())
                         yield self.build_chat_completion_chunk(_request_id, content=result, model=self.model_path)
 
+                token_count = generation_streamer.last_generated_length
+                stats = {
+                    "total_time": times[-1] - times[0],
+                    "ttft": times[1] - times[0],
+                    "tpot": ((times[-1] - times[1]) / token_count) if token_count > 0 else 0,
+                }
                 logger.info(f"Generation completed for request {_request_id}. Prompt: {inputs.shape[1]} tokens, Generated: {token_count} tokens")
+                # Print generation stats in seconds. Printing up to 4 decimal places
+                for key, value in stats.items():
+                    logger.info(f" - {key}: {value:.4f} seconds")
                 usage = None
                 if request.get("stream_options", {}).get("include_usage"):
                     usage = {

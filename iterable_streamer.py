@@ -27,6 +27,8 @@ class IterableStreamer(openvino_genai.StreamerBase):
         self.text_queue = queue.Queue()
         self.print_len = 0
         self.decoded_lengths = []
+        self._current_length = 0
+        self.last_generated_length = 0
 
     def __iter__(self):
         """
@@ -81,8 +83,10 @@ class IterableStreamer(openvino_genai.StreamerBase):
         if type(token) is list:
             self.tokens_cache += token
             self.decoded_lengths += [-2 for _ in range(len(token) - 1)]
+            self._current_length += len(token)
         else:
             self.tokens_cache.append(token)
+            self._current_length += 1
 
         text = self.tokenizer.decode(self.tokens_cache)
         self.decoded_lengths.append(len(text))
@@ -141,4 +145,6 @@ class IterableStreamer(openvino_genai.StreamerBase):
             self.write_word(word)
             self.tokens_cache = []
             self.print_len = 0
+        self.last_generated_length = self._current_length
+        self._current_length = 0
         self.text_queue.put(None)
