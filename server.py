@@ -32,6 +32,7 @@ class OVServer:
     def __init__(
             self,
             model_path,
+            draft_path=None,
             port=8000,
             host="localhost",
             device="GPU",
@@ -40,6 +41,8 @@ class OVServer:
         logger.info(f"Initializing OV Server with model: {model_path}, device: {device}, host: {host}, port: {port}")
         
         self.model_path = model_path
+        self.draft_path = draft_path
+        self.num_assistant_tokens = 3
         self.port = port
         self.host = host
         self.log_level = log_level
@@ -51,12 +54,32 @@ class OVServer:
             scheduler_config.max_num_batched_tokens = 4096 * 4
             # scheduler_config.enable_prefix_caching = True
             # scheduler_config.num_kv_blocks = 4096 // 16
-            logger.info(f"Loading LLM pipeline from {self.model_path} on {self.device}")
-            self.model = ovgenai.LLMPipeline(
-                self.model_path,
-                self.device,
-                scheduler_config=scheduler_config,
-            )
+            if self.draft_path:
+                logger.info(f"Loading draft model from {self.draft_path}")
+                draft_scheduler_config = ovgenai.SchedulerConfig()
+                draft_scheduler_config.dynamic_split_fuse = False
+                draft_scheduler_config.max_num_batched_tokens = 4096 * 4
+                draft_scheduler_config.num_kv_blocks = 4096 * 4 // 16
+                logger.info(f"Loading draft model from {self.draft_path}")
+                draft_model = ovgenai.draft_model(
+                    self.draft_path,
+                    self.device,
+                    scheduler_config=draft_scheduler_config,
+                )
+                logger.info(f"Loading LLM pipeline from {self.model_path} on {self.device} with draft model")
+                self.model = ovgenai.LLMPipeline(
+                    self.model_path,
+                    self.device,
+                    draft_model=draft_model,
+                    scheduler_config=scheduler_config
+                )
+            else:
+                logger.info(f"Loading LLM pipeline from {self.model_path} on {self.device}")
+                self.model = ovgenai.LLMPipeline(
+                    self.model_path,
+                    self.device,
+                    scheduler_config=scheduler_config,
+                )
             
             logger.info(f"Loading tokenizer from {model_path}")
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -69,6 +92,7 @@ class OVServer:
     @staticmethod
     def add_server_arguments(parser):
         parser.add_argument("--model_path", type=str, default=None, required=True, help="Path to the model directory or model name")
+        parser.add_argument("--draft_path", type=str, default=None, help="Path to the draft model directory or model name")
         parser.add_argument("--port", type=int, default=8000, help="Port to run the server on")
         parser.add_argument("--host", type=str, default="localhost", help="Host to run the server on")
         parser.add_argument("--device", type=str, default="GPU", help="Device to run inference on (CPU, GPU)")
@@ -229,6 +253,10 @@ class OVServer:
                 generation_config = ovgenai.GenerationConfig(**json.loads(req["generation_config"]))
             else:
                 generation_config = model_generation_config
+
+            # Speculative-specific parameters
+            generation_config.num_assistant_tokens = self.num_assistant_tokens
+            generation_config.assistant_confidence_threshold = 0
                 
             # Response-specific parameters
             if req.get("max_output_tokens") is not None:
@@ -261,6 +289,48 @@ class OVServer:
             logger.error(f"Error creating generation config: {str(e)}")
             logger.warning("Falling back to default generation config")
             return model_generation_config
+        
+
+
+def main(
+        model_path,
+        draft_path=None,
+        port=8000,
+        host="localhost",
+        device="GPU",
+        log_level="info",
+        do_warmup=False,
+    ):
+    """Main function to start the OpenVINO GenAI Server.
+    
+    Args:
+        model_path (str): Path to the model directory or model name
+        draft_path (str, optional): Path to the draft model directory or model name
+        port (int): Port to run the server on
+        host (str): Host to run the server on
+        device (str): Device to run inference on (CPU, GPU)
+        log_level (str): Logging level
+        do_warmup (bool): Whether to perform a warmup run on startup
+    """
+    logger.info("Starting OpenVINO GenAI Server")
+    logger.info(f"Model: {model_path}, Device: {device}, Host: {host}, Port: {port}")
+    
+    try:
+        server = OVServer(
+            model_path=model_path,
+            draft_path=draft_path,
+            port=port,
+            host=host,
+            device=device,
+            log_level=log_level,
+        )
+        server.run()
+    except KeyboardInterrupt:
+        logger.info("Server shutdown requested by user")
+    except Exception as e:
+        logger.error(f"Server failed to start: {str(e)}")
+        raise
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="OV Server")
@@ -273,14 +343,4 @@ if __name__ == '__main__':
         level=logging.INFO
     )
     
-    logger.info("Starting OpenVINO GenAI Server")
-    logger.info(f"Arguments: {vars(args)}")
-    
-    try:
-        server = OVServer(**vars(args))
-        server.run()
-    except KeyboardInterrupt:
-        logger.info("Server shutdown requested by user")
-    except Exception as e:
-        logger.error(f"Server failed to start: {str(e)}")
-        raise
+    main(**vars(args))
