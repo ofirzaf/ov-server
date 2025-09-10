@@ -33,6 +33,7 @@ class OVServer:
             self,
             model_path,
             draft_path=None,
+            num_assistant_tokens=3,
             port=8000,
             host="localhost",
             device="GPU",
@@ -42,7 +43,7 @@ class OVServer:
         
         self.model_path = model_path
         self.draft_path = draft_path
-        self.num_assistant_tokens = 3
+        self.num_assistant_tokens = num_assistant_tokens
         self.port = port
         self.host = host
         self.log_level = log_level
@@ -97,6 +98,7 @@ class OVServer:
         parser.add_argument("--host", type=str, default="localhost", help="Host to run the server on")
         parser.add_argument("--device", type=str, default="GPU", help="Device to run inference on (CPU, GPU)")
         parser.add_argument("--log_level", type=str, default="info", help="Logging level")
+        parser.add_argument("--num_assistant_tokens", type=int, default=3, help="Number of assistant tokens to generate")
 
     @staticmethod
     def get_clean_messages(messages):
@@ -305,11 +307,11 @@ class OVServer:
 def main(
         model_path,
         draft_path=None,
+        num_assistant_tokens=3,
         port=8000,
         host="localhost",
         device="GPU",
         log_level="info",
-        do_warmup=False,
     ):
     """Main function to start the OpenVINO GenAI Server.
     
@@ -329,6 +331,7 @@ def main(
         server = OVServer(
             model_path=model_path,
             draft_path=draft_path,
+            num_assistant_tokens=num_assistant_tokens,
             port=port,
             host=host,
             device=device,
